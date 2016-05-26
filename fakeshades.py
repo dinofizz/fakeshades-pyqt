@@ -170,6 +170,12 @@ class MainWindow(QMainWindow):
     def draw_points(self, qp):
         for column, row in ((column, row) for column in range(48) for row in range(16)):
             qp.setRenderHint(QPainter.Antialiasing, True)
+
+            # QColor accepts (R, G, B, alpha) values.
+            # We multiply the 16bit "brightness" value obtained from the serial port by 17
+            # to give us a value mapped to a max of 255:
+            # 16 bit brightness values: 0 - 15
+            # 15 * 17 = 255
             qp.setBrush(QColor(0x00, 0x00, 0x00, (self.matrix[column][row] * 17)))
             qp.drawEllipse(10 + (column * 20), 10 + (row * 20), 10, 10)
 
