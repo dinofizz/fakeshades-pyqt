@@ -5,8 +5,8 @@ ipython-genutils==0.1.0
 pexpect==4.0.1
 pickleshare==0.7.2
 ptyprocess==0.5.1
-PyQt5==5.6
+PyQt5==5.7
 pyserial==3.0.1
 simplegeneric==0.8.1
-sip==4.18
+sip==4.18.1
 traitlets==4.2.1

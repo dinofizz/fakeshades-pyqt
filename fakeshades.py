@@ -10,7 +10,7 @@ from serial import SerialException
 
 class SerialWorker(QThread):
     update_matrix_signal = pyqtSignal()
-    header = bytes([0xba, 0x5e, 0xba, 0x11])
+    header = bytes([0xde, 0xad, 0xbe, 0xef, 0x01, 0x02])
 
     def __init__(self, serial_connection, matrix, parent=None):
         QThread.__init__(self, parent)
@@ -40,7 +40,7 @@ class SerialWorker(QThread):
                 for i in range(len(self.header)):
                     if bytes([self.header[header_position]]) == byte:
                         header_position += 1
-                        if header_position == 4:
+                        if header_position == len(self.header):
                             received_header = True
                             print("RECEIVED HEADER")
                             header_position = 0
@@ -56,10 +56,8 @@ class SerialWorker(QThread):
                 num_rows = byte[0]
                 max_bytes = int(num_columns * num_rows / 2)
                 received_count = True
-                print("Num columns: {0}\nNum rows: {1}\nNum LEDs: {2}\nMax bytes to receive: {3}".format(
-                    num_columns, num_rows, (num_columns * num_rows), max_bytes))
             else:
-                if column < num_columns:
+                if byte_count < max_bytes:
                     if row > 15:
                         row = 0
                         column += 1
@@ -67,8 +65,8 @@ class SerialWorker(QThread):
                     brightness_first = byte[0] >> 4
                     brightness_second = byte[0] & 0x0F
 
-                    self.matrix[column][row] = brightness_first
-                    print(self.matrix[column][row])
+                    actual_row = abs(row - (num_rows - 1))
+                    self.matrix[column][actual_row] = brightness_first
 
                     row += 1
 
@@ -76,14 +74,14 @@ class SerialWorker(QThread):
                         row = 0
                         column += 1
 
-                    self.matrix[column][row] = brightness_second
-                    print(self.matrix[column][row])
+                    actual_row = abs(row - (num_rows - 1))
+                    self.matrix[column][actual_row] = brightness_second
 
                     row += 1
 
                     byte_count += 1
 
-                    if byte_count is max_bytes:
+                    if byte_count == max_bytes:
                         column = 0
                         row = 0
                         max_bytes = 0
@@ -91,7 +89,6 @@ class SerialWorker(QThread):
                         received_count = False
                         received_header = False
                         self.update_matrix_signal.emit()
-                        print("\nEND FRAME\n")
 
 
 class MainWindow(QMainWindow):
@@ -119,7 +116,7 @@ class MainWindow(QMainWindow):
         self.baud_combo.addItem("38400")    #2
         self.baud_combo.addItem("57600")    #3
         self.baud_combo.addItem("115200")   #4
-        self.baud_combo.setCurrentIndex(3)
+        self.baud_combo.setCurrentIndex(4)
 
         self.statusBar().addWidget(self.serial_port)
         self.statusBar().addWidget(self.baud_combo)
