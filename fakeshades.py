@@ -28,7 +28,6 @@ class SerialWorker(QThread):
         received_header = False
         received_count = False
         byte_count = 0
-        num_columns = 0
         column = 0
         row = 0
         max_bytes = 0
@@ -42,7 +41,6 @@ class SerialWorker(QThread):
                         header_position += 1
                         if header_position == len(self.header):
                             received_header = True
-                            print("RECEIVED HEADER")
                             header_position = 0
                         else:
                             byte = self.serial_connection.read()
