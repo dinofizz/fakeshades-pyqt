@@ -8,17 +8,23 @@ from serial import SerialException
 
 
 class SerialWorker(QThread):
-    update_matrix_signal = pyqtSignal()
+    update_matrix_signal = pyqtSignal(list)
+    serial_connected = pyqtSignal()
+    serial_error_text = pyqtSignal(str)
     header = bytes([0xba, 0x5e, 0xba, 0x11])
 
-    def __init__(self, serial_connection, matrix, parent=None):
+    def __init__(self, port, baudrate, parent=None):
         QThread.__init__(self, parent)
 
-        self.serial_connection = serial_connection
+        self.port = port
+        self.baudrate = baudrate
+        self.serial_connection = None
         self.exiting = False
-        self.matrix = matrix
+        self.matrix = None
 
-    def __del__(self):
+    def stop(self):
+        if self.serial_connection is not None:
+            self.serial_connection.close()
         self.exiting = True
         self.wait()
 
@@ -31,60 +37,78 @@ class SerialWorker(QThread):
         row = 0
         max_bytes = 0
 
-        while True:
-            byte = self.serial_connection.read()
-
-            if received_header is False:
-                for i in range(len(self.header)):
-                    if bytes([self.header[header_position]]) == byte:
-                        header_position += 1
-                        if header_position == len(self.header):
-                            received_header = True
-                            header_position = 0
-                        else:
-                            byte = self.serial_connection.read()
-                    else:
-                        received_header = False
-                        header_position = 0
-                        break
-            elif received_count is False:
-                num_columns = byte[0]
-                byte = self.serial_connection.read()
-                num_rows = byte[0]
-                max_bytes = int(num_columns * num_rows / 2)
-                received_count = True
+        try:
+            self.serial_connection = serial.Serial(self.port, baudrate=self.baudrate, rtscts=True, dsrdtr=True)
+            if self.serial_connection.is_open:
+                self.serial_connected.emit()
             else:
-                brightness_first = byte[0] >> 4
-                brightness_second = byte[0] & 0x0F
+                self.serial_error_text.emit("Error occurred while opening serial port. Try again.")
+                self.stop()
+                return
+        except SerialException as ex:
+            self.serial_error_text.emit(ex.strerror)
+            self.stop()
+            return
 
-                if row > num_rows - 1:
-                    row = 0
-                    column += 1
+        while True:
+            try:
+                byte = self.serial_connection.read()
+                if received_header is False:
+                    for i in range(len(self.header)):
+                        if bytes([self.header[header_position]]) == byte:
+                            header_position += 1
+                            if header_position == len(self.header):
+                                received_header = True
+                                header_position = 0
+                            else:
+                                byte = self.serial_connection.read()
+                        else:
+                            received_header = False
+                            header_position = 0
+                            break
+                elif received_count is False:
+                    num_columns = byte[0]
+                    byte = self.serial_connection.read()
+                    num_rows = byte[0]
+                    max_bytes = int(num_columns * num_rows / 2)
+                    self.matrix = [[0 for i in range(num_rows)] for i in range(num_columns)]
+                    received_count = True
+                else:
+                    brightness_first = byte[0] >> 4
+                    brightness_second = byte[0] & 0x0F
 
-                actual_row = abs(row - (num_rows - 1))
-                self.matrix[column][actual_row] = brightness_first
+                    if row > num_rows - 1:
+                        row = 0
+                        column += 1
 
-                row += 1
+                    actual_row = abs(row - (num_rows - 1))
+                    self.matrix[column][actual_row] = brightness_first
 
-                if row > num_rows - 1:
-                    row = 0
-                    column += 1
+                    row += 1
 
-                actual_row = abs(row - (num_rows - 1))
-                self.matrix[column][actual_row] = brightness_second
+                    if row > num_rows - 1:
+                        row = 0
+                        column += 1
 
-                row += 1
+                    actual_row = abs(row - (num_rows - 1))
+                    self.matrix[column][actual_row] = brightness_second
 
-                byte_count += 1
+                    row += 1
 
-                if byte_count == max_bytes:
-                    column = 0
-                    row = 0
-                    max_bytes = 0
-                    byte_count = 0
-                    received_count = False
-                    received_header = False
-                    self.update_matrix_signal.emit()
+                    byte_count += 1
+
+                    if byte_count == max_bytes:
+                        column = 0
+                        row = 0
+                        max_bytes = 0
+                        byte_count = 0
+                        received_count = False
+                        received_header = False
+                        self.update_matrix_signal.emit(self.matrix)
+                        self.matrix = None
+            except SerialException:
+                print("Error reading Serial Port")
+                break
 
 
 class MainWindow(QMainWindow):
@@ -96,8 +120,7 @@ class MainWindow(QMainWindow):
 
         self.serial_connection = None
         self.connected = False
-
-        self.matrix = [[0 for i in range(16)] for i in range(48)]
+        self.matrix = None
 
         self.connect_button = QPushButton('Connect')
         self.connect_button.clicked.connect(self.connect_button_clicked)
@@ -124,23 +147,23 @@ class MainWindow(QMainWindow):
         self.status_label.setText('Connecting')
 
         if self.connected:
-            self.serial_connection.close()
-            self.thread.exiting = True
-            self.thread = None
+            self.thread.stop()
             self.set_serial_status(False)
         else:
-            try:
-                self.serial_connection = serial.Serial(
-                    self.serial_port.text(), baudrate=int(self.baud_combo.currentText()), rtscts=True, dsrdtr=True)
-                if self.serial_connection.is_open:
-                    self.set_serial_status(True)
-                    self.thread = SerialWorker(self.serial_connection, self.matrix)
-                    self.thread.update_matrix_signal.connect(self.update_matrix)
-                    self.thread.start()
-            except SerialException as ex:
-                self.status_label.setText(ex.strerror)
+            self.thread = SerialWorker(self.serial_port.text(), int(self.baud_combo.currentText()))
+            self.thread.update_matrix_signal.connect(self.update_matrix)
+            self.thread.serial_error_text.connect(self.connect_error)
+            self.thread.serial_connected.connect(self.serial_connected)
+            self.thread.start()
 
-    def update_matrix(self):
+    def connect_error(self, error_message):
+        self.status_label.setText(error_message)
+
+    def serial_connected(self):
+        self.set_serial_status(True)
+
+    def update_matrix(self, matrix):
+        self.matrix = matrix
         self.update()
 
     def set_serial_status(self, connected):
@@ -156,12 +179,14 @@ class MainWindow(QMainWindow):
             self.serial_port.setEnabled(True)
 
     def paintEvent(self, event):
-        qp = QPainter()
-        qp.begin(self)
-        self.draw_points(qp)
-        qp.end()
+        if self.matrix is not None:
+            qp = QPainter()
+            qp.begin(self)
+            self.draw_points(qp)
+            qp.end()
 
     def draw_points(self, qp):
+        # TODO: variable size display! Use size of matrix.
         for column, row in ((column, row) for column in range(48) for row in range(16)):
             qp.setRenderHint(QPainter.Antialiasing, True)
 
