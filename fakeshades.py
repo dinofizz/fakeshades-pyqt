@@ -1,16 +1,15 @@
 import signal
 
+import serial
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QLineEdit, QComboBox
-import random
-import serial
 from serial import SerialException
 
 
 class SerialWorker(QThread):
     update_matrix_signal = pyqtSignal()
-    header = bytes([0xde, 0xad, 0xbe, 0xef, 0x01, 0x02])
+    header = bytes([0xba, 0x5e, 0xba, 0x11])
 
     def __init__(self, serial_connection, matrix, parent=None):
         QThread.__init__(self, parent)
@@ -55,38 +54,37 @@ class SerialWorker(QThread):
                 max_bytes = int(num_columns * num_rows / 2)
                 received_count = True
             else:
-                if byte_count < max_bytes:
-                    if row > 15:
-                        row = 0
-                        column += 1
+                brightness_first = byte[0] >> 4
+                brightness_second = byte[0] & 0x0F
 
-                    brightness_first = byte[0] >> 4
-                    brightness_second = byte[0] & 0x0F
+                if row > num_rows - 1:
+                    row = 0
+                    column += 1
 
-                    actual_row = abs(row - (num_rows - 1))
-                    self.matrix[column][actual_row] = brightness_first
+                actual_row = abs(row - (num_rows - 1))
+                self.matrix[column][actual_row] = brightness_first
 
-                    row += 1
+                row += 1
 
-                    if row > 15:
-                        row = 0
-                        column += 1
+                if row > num_rows - 1:
+                    row = 0
+                    column += 1
 
-                    actual_row = abs(row - (num_rows - 1))
-                    self.matrix[column][actual_row] = brightness_second
+                actual_row = abs(row - (num_rows - 1))
+                self.matrix[column][actual_row] = brightness_second
 
-                    row += 1
+                row += 1
 
-                    byte_count += 1
+                byte_count += 1
 
-                    if byte_count == max_bytes:
-                        column = 0
-                        row = 0
-                        max_bytes = 0
-                        byte_count = 0
-                        received_count = False
-                        received_header = False
-                        self.update_matrix_signal.emit()
+                if byte_count == max_bytes:
+                    column = 0
+                    row = 0
+                    max_bytes = 0
+                    byte_count = 0
+                    received_count = False
+                    received_header = False
+                    self.update_matrix_signal.emit()
 
 
 class MainWindow(QMainWindow):
@@ -114,7 +112,8 @@ class MainWindow(QMainWindow):
         self.baud_combo.addItem("38400")    #2
         self.baud_combo.addItem("57600")    #3
         self.baud_combo.addItem("115200")   #4
-        self.baud_combo.setCurrentIndex(4)
+        self.baud_combo.addItem("230400")   #5
+        self.baud_combo.setCurrentIndex(5)
 
         self.statusBar().addWidget(self.serial_port)
         self.statusBar().addWidget(self.baud_combo)
@@ -178,9 +177,9 @@ class MainWindow(QMainWindow):
 def main():
     import sys
 
+    # To help with quitting the application.
+    # http://stackoverflow.com/questions/4938723/what-is-the-correct-way-to-make-my-pyqt-application-quit-when-killed-from-the-co/6072360#6072360
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-
-    random.seed()
 
     app = QApplication(sys.argv)
 
